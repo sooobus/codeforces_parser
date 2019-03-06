@@ -1,8 +1,8 @@
 import requests
-import json
 import random
 import os
 import logging
+import time
 
 from bs4 import BeautifulSoup
 from tqdm import tqdm
@@ -10,9 +10,8 @@ from tqdm import tqdm
 logging.basicConfig(filename="log.log", level=logging.ERROR)
 
 class Downloader:
-    def __init__(self, problems_complexity_interval, problems_counts, problems_tags, tests_folder="test/", sources_folder="source/"):
+    def __init__(self, problems_complexity_interval, problems_counts, tests_folder="test/", sources_folder="source/"):
         self.complexity = problems_complexity_interval
-        self.tags = problems_tags
         self.max_count = problems_counts
         self.tests_folder = tests_folder
         self.source_folder = sources_folder
@@ -36,13 +35,23 @@ class Downloader:
         with open(self.source_folder + str(contest_id) + "_" + str(sub_id) + ".cpp", "w") as f:
             f.write(source)
 
+    def ask_codeforces(self, request_text):
+        time.sleep(0.2)
+        page = requests.get(request_text)
+        if page.status_code == 200:
+            return page
+        elif page.status_code == 403:
+            return None
+        else:
+            raise Exception("Couldn't interact with Codeforces: status {}".format(page.status_code))
+
     def get_submission_texts(self):
         contest_sub_ids = self.get_submission_ids()
         print("Got {} submissions".format(len(contest_sub_ids)))
         print("Parsing submissions...")
         for contest_id, sub_id in tqdm(contest_sub_ids):
-            page = requests.get("http://codeforces.com/contest/{}/submission/{}".format(contest_id, sub_id)) 
-            if page.status_code == 200:
+            page = self.ask_codeforces("http://codeforces.com/contest/{}/submission/{}".format(contest_id, sub_id))
+            if page:
                 try:
                     soup = BeautifulSoup(page.content, 'html.parser')
                     source = str(soup.find("pre", {"id": "program-source-text"}).string)
@@ -71,9 +80,9 @@ class Downloader:
 
     def get_problems_with_contests(self):
         print("Getting some problems...")
-        request = requests.get("http://codeforces.com/api/problemset.problems")
-        json_ans = request.json()
-        if json_ans['status'] == 'OK':
+        request = self.ask_codeforces("http://codeforces.com/api/problemset.problems")
+        if request:
+            json_ans = request.json()
             problems = json_ans['result']['problems']
             problems = list(filter(lambda p: 'rating' in p and (self.complexity[0] <= p['rating'] < self.complexity[1]), problems))
             random.shuffle(problems)
@@ -81,11 +90,11 @@ class Downloader:
             contests = [p['contestId'] for p in problems]
             problems_indices = [p['index'] for p in problems]
             return problems_indices, contests
- 
-    def successful_submissions(self, contest_id, problem_id, count=100):
-        request = requests.get("http://codeforces.com/api/contest.status?contestId={}&from=1&count={}".format(contest_id, count))
-        json_ans = request.json()
-        if json_ans['status'] == 'OK':
+
+    def successful_submissions(self, contest_id, problem_id, count=1000):
+        request = self.ask_codeforces("http://codeforces.com/api/contest.status?contestId={}&from=1&count={}".format(contest_id, count))
+        if request:
+            json_ans = request.json()
             submissions = json_ans['result']
             submissions = filter(lambda s: s['problem']['index'] == problem_id and 
                                            s['testset'] == "TESTS" and
@@ -94,5 +103,6 @@ class Downloader:
             submission_ids = [(contest_id, s['id']) for s in submissions]
             return submission_ids
 
-d = Downloader([0, 10000], 100, [])
-print(d.get_submission_texts())
+if __name__ == "__main__":
+    d = Downloader([0, 10000], 100)
+    print(d.get_submission_texts())
